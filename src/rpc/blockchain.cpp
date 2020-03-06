@@ -966,6 +966,49 @@ static UniValue pruneblockchain(const JSONRPCRequest& request)
     return uint64_t(block->nHeight);
 }
 
+//! Calculate statistics about the unspent transaction output set
+static bool GetUTXOSet(CCoinsView *view, std::map<CScript, CAmount> &utxoset)
+{
+    std::unique_ptr<CCoinsViewCursor> pcursor(view->Cursor());
+
+    while (pcursor->Valid()) {
+        boost::this_thread::interruption_point();
+        uint256 key;
+        CCoins coins;
+        if (pcursor->GetKey(key) && pcursor->GetValue(coins)) {
+            for (unsigned int i=0; i<coins.vout.size(); i++) {
+                const CTxOut &out = coins.vout[i];
+                if (!out.IsNull() && out.nValue != 0)
+                    utxoset[out.scriptPubKey] += out.nValue;
+            }
+        } else {
+            return error("%s: unable to read value", __func__);
+        }
+        pcursor->Next();
+    }
+    return true;
+}
+
+UniValue dumputxoset(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() != 0)
+        throw runtime_error("dumputxoset\n\nReturns the whole, consolidated utxo set.\n");
+    UniValue ret(UniValue::VARR);
+    std::map<CScript, CAmount> utxoset;
+    FlushStateToDisk();
+    if (!GetUTXOSet(pcoinsTip, utxoset))
+        throw JSONRPCError(RPC_INTERNAL_ERROR, "Unable to read UTXO set");
+    for (const auto utxo: utxoset) {
+        UniValue jsonScript(UniValue::VOBJ);
+        ScriptPubKeyToJSON(utxo.first, jsonScript, true);
+        UniValue out(UniValue::VOBJ);
+        out.pushKV("Amount", utxo.second);
+        out.pushKV("Script", jsonScript);
+        ret.push_back(out);
+    }
+    return ret;
+}
+
 static UniValue gettxoutsetinfo(const JSONRPCRequest& request)
 {
             RPCHelpMan{"gettxoutsetinfo",
@@ -2256,6 +2299,7 @@ static UniValue getblockfilter(const JSONRPCRequest& request)
 static const CRPCCommand commands[] =
 { //  category              name                      actor (function)         argNames
   //  --------------------- ------------------------  -----------------------  ----------
+    { "blockchain",         "dumputxoset",            &dumputxoset,            {} },
     { "blockchain",         "getblockchaininfo",      &getblockchaininfo,      {} },
     { "blockchain",         "getchaintxstats",        &getchaintxstats,        {"nblocks", "blockhash"} },
     { "blockchain",         "getblockstats",          &getblockstats,          {"hash_or_height", "stats"} },
