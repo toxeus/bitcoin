@@ -973,14 +973,11 @@ static bool GetUTXOSet(CCoinsView *view, std::map<CScript, CAmount> &utxoset)
 
     while (pcursor->Valid()) {
         boost::this_thread::interruption_point();
-        uint256 key;
-        CCoins coins;
+        COutPoint key;
+        Coin coins;
         if (pcursor->GetKey(key) && pcursor->GetValue(coins)) {
-            for (unsigned int i=0; i<coins.vout.size(); i++) {
-                const CTxOut &out = coins.vout[i];
-                if (!out.IsNull() && out.nValue != 0)
-                    utxoset[out.scriptPubKey] += out.nValue;
-            }
+            if (!coins.out.IsNull() && coins.out.nValue != 0)
+                utxoset[coins.out.scriptPubKey] += coins.out.nValue;
         } else {
             return error("%s: unable to read value", __func__);
         }
@@ -992,15 +989,15 @@ static bool GetUTXOSet(CCoinsView *view, std::map<CScript, CAmount> &utxoset)
 UniValue dumputxoset(const JSONRPCRequest& request)
 {
     if (request.fHelp || request.params.size() != 0)
-        throw runtime_error("dumputxoset\n\nReturns the whole, consolidated utxo set.\n");
+        throw std::runtime_error("dumputxoset\n\nReturns the whole, consolidated utxo set.\n");
     UniValue ret(UniValue::VARR);
     std::map<CScript, CAmount> utxoset;
-    FlushStateToDisk();
+    ::ChainstateActive().ForceFlushStateToDisk();
     if (!GetUTXOSet(pcoinsTip, utxoset))
         throw JSONRPCError(RPC_INTERNAL_ERROR, "Unable to read UTXO set");
     for (const auto utxo: utxoset) {
         UniValue jsonScript(UniValue::VOBJ);
-        ScriptPubKeyToJSON(utxo.first, jsonScript, true);
+        ScriptPubKeyToUniv(utxo.first, jsonScript, true);
         UniValue out(UniValue::VOBJ);
         out.pushKV("Amount", utxo.second);
         out.pushKV("Script", jsonScript);
