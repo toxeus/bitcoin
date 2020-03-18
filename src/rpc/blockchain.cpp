@@ -967,9 +967,9 @@ static UniValue pruneblockchain(const JSONRPCRequest& request)
 }
 
 //! Calculate statistics about the unspent transaction output set
-static bool GetUTXOSet(CCoinsView *view, std::map<CScript, CAmount> &utxoset)
+static bool GetUTXOSet(std::map<CScript, CAmount> &utxoset)
 {
-    std::unique_ptr<CCoinsViewCursor> pcursor(view->Cursor());
+    std::unique_ptr<CCoinsViewCursor> pcursor(pcoinsdbview->Cursor());
 
     while (pcursor->Valid()) {
         boost::this_thread::interruption_point();
@@ -990,18 +990,18 @@ UniValue dumputxoset(const JSONRPCRequest& request)
 {
     if (request.fHelp || request.params.size() != 0)
         throw std::runtime_error("dumputxoset\n\nReturns the whole, consolidated utxo set.\n");
-    UniValue ret(UniValue::VARR);
+    UniValue ret(UniValue::VOBJ);
     std::map<CScript, CAmount> utxoset;
     ::ChainstateActive().ForceFlushStateToDisk();
-    if (!GetUTXOSet(pcoinsTip, utxoset))
+    if (!GetUTXOSet(utxoset))
         throw JSONRPCError(RPC_INTERNAL_ERROR, "Unable to read UTXO set");
     for (const auto utxo: utxoset) {
-        UniValue jsonScript(UniValue::VOBJ);
-        ScriptPubKeyToUniv(utxo.first, jsonScript, true);
-        UniValue out(UniValue::VOBJ);
-        out.pushKV("Amount", utxo.second);
-        out.pushKV("Script", jsonScript);
-        ret.push_back(out);
+        txnouttype type;
+        std::vector<CTxDestination> addresses;
+        int nRequired;
+        assert(ExtractDestinations(utxo.first, type, addresses, nRequired));
+        assert(addresses.size() == 1);
+        ret.pushKV(EncodeDestination(addresses[0]), ValueFromAmount(utxo.second));
     }
     return ret;
 }
