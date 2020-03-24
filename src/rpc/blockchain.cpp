@@ -990,18 +990,39 @@ UniValue dumputxoset(const JSONRPCRequest& request)
 {
     if (request.fHelp || request.params.size() != 0)
         throw std::runtime_error("dumputxoset\n\nReturns the whole, consolidated utxo set.\n");
-    UniValue ret(UniValue::VOBJ);
+    UniValue ret(UniValue::VARR);
     std::map<CScript, CAmount> utxoset;
     ::ChainstateActive().ForceFlushStateToDisk();
     if (!GetUTXOSet(utxoset))
         throw JSONRPCError(RPC_INTERNAL_ERROR, "Unable to read UTXO set");
+    auto txWeight = 533U; // tx with 1 p2sh input and 0 outputs
+    UniValue obj(UniValue::VOBJ);
     for (const auto utxo: utxoset) {
+        if (IsDust(CTxOut(utxo.second, utxo.first), ::dustRelayFee))
+            continue;
         txnouttype type;
         std::vector<CTxDestination> addresses;
         int nRequired;
         assert(ExtractDestinations(utxo.first, type, addresses, nRequired));
         assert(addresses.size() == 1);
-        ret.pushKV(EncodeDestination(addresses[0]), ValueFromAmount(utxo.second));
+        auto weight = 0;
+        switch (type) {
+            case TX_SCRIPTHASH:
+                weight = 128;
+                break;
+            case TX_PUBKEYHASH:
+                weight = 136;
+                break;
+            default:
+                assert(false);
+        }
+        if (txWeight + weight > MAX_STANDARD_TX_WEIGHT) {
+            ret.push_back(obj);
+            txWeight = 533 + weight;
+            obj = UniValue(UniValue::VOBJ);
+        } else
+            txWeight += weight;
+        obj.pushKV(EncodeDestination(addresses[0]), ValueFromAmount(utxo.second));
     }
     return ret;
 }
